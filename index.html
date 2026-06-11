@@ -1,0 +1,1526 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visionneuse Plans Anciens</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Georgia', serif; background: #1a1410; color: #e8dcc8; height: 100vh; display: flex; flex-direction: column; }
+
+  #toolbar {
+    background: #2a2018;
+    border-bottom: 1px solid #5a4a30;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    z-index: 1000;
+  }
+
+  .toolbar-title {
+    font-size: 14px;
+    color: #c8a96e;
+    font-style: italic;
+    margin-right: 8px;
+    white-space: nowrap;
+  }
+
+  .btn {
+    background: #3a2e1a;
+    border: 1px solid #6a5a3a;
+    color: #e8dcc8;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: 'Georgia', serif;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .btn:hover { background: #4a3e2a; border-color: #c8a96e; color: #c8a96e; }
+  .btn.primary { background: #5a3a10; border-color: #c8a96e; color: #f0d898; }
+  .btn.primary:hover { background: #7a5020; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  #map { flex: 1; }
+
+  /* Panel géoréférencement */
+  #geo-panel {
+    position: fixed;
+    top: 50px;
+    right: 16px;
+    width: 380px;
+    background: #2a2018;
+    border: 1px solid #5a4a30;
+    border-radius: 6px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    z-index: 2000;
+    display: none;
+    flex-direction: column;
+    max-height: calc(100vh - 70px);
+    overflow: hidden;
+  }
+  #geo-panel.visible { display: flex; }
+
+  .panel-header {
+    background: #3a2e1a;
+    padding: 10px 14px;
+    border-bottom: 1px solid #5a4a30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-header span { font-size: 13px; color: #c8a96e; font-style: italic; }
+  .panel-close { cursor: pointer; color: #8a7a6a; font-size: 16px; line-height: 1; }
+  .panel-close:hover { color: #c8a96e; }
+
+  .panel-body { padding: 14px; overflow-y: auto; flex: 1; }
+
+  .field-group { margin-bottom: 12px; }
+  .field-label { font-size: 11px; color: #9a8a7a; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .drop-zone {
+    border: 1px dashed #5a4a30;
+    border-radius: 4px;
+    padding: 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: #1e1810;
+    font-size: 12px;
+    color: #7a6a5a;
+  }
+  .drop-zone:hover, .drop-zone.dragover { border-color: #c8a96e; color: #c8a96e; background: #2e2418; }
+  .drop-zone.has-file { border-color: #6a9a4a; color: #9aba7a; background: #1e2a18; }
+
+  input[type="text"], input[type="number"], select {
+    width: 100%;
+    background: #1e1810;
+    border: 1px solid #4a3a28;
+    border-radius: 4px;
+    color: #e8dcc8;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: 'Georgia', serif;
+  }
+  input[type="text"]:focus, input[type="number"]:focus, select:focus {
+    outline: none;
+    border-color: #c8a96e;
+  }
+  select option { background: #2a2018; }
+
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  .info-box {
+    background: #1e1810;
+    border: 1px solid #3a2e1a;
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 11px;
+    color: #7a6a5a;
+    line-height: 1.6;
+  }
+
+  /* Barre de progression */
+  #progress-area {
+    padding: 10px 14px;
+    border-top: 1px solid #3a2e1a;
+    display: none;
+  }
+  #progress-area.visible { display: block; }
+  .progress-bar-bg {
+    background: #1e1810;
+    border-radius: 3px;
+    height: 8px;
+    overflow: hidden;
+    margin: 6px 0;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #8a6a2a, #c8a96e);
+    border-radius: 3px;
+    transition: width 0.1s;
+    width: 0%;
+  }
+  .progress-text { font-size: 11px; color: #9a8a6a; }
+
+  /* Couches actives */
+  #layers-panel {
+    position: fixed;
+    top: 50px;
+    left: 16px;
+    width: 220px;
+    background: #2a2018;
+    border: 1px solid #5a4a30;
+    border-radius: 6px;
+    z-index: 1500;
+    display: none;
+    max-height: 50vh;
+    overflow: hidden;
+  }
+  #layers-panel.visible { display: flex; flex-direction: column; }
+
+  .layer-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid #3a2e1a;
+    font-size: 12px;
+  }
+  .layer-item:last-child { border-bottom: none; }
+  .layer-toggle {
+    width: 14px; height: 14px;
+    border: 1px solid #6a5a3a;
+    border-radius: 2px;
+    cursor: pointer;
+    background: #4a8a2a;
+    flex-shrink: 0;
+  }
+  .layer-toggle.off { background: #3a2e1a; }
+  .layer-name { flex: 1; color: #c8b898; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .layer-del { color: #7a5a5a; cursor: pointer; font-size: 14px; }
+  .layer-del:hover { color: #c05050; }
+
+  /* Notification */
+  #notif {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #3a2e1a;
+    border: 1px solid #c8a96e;
+    color: #e8dcc8;
+    padding: 8px 18px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 9999;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #notif.show { opacity: 1; }
+
+  .btn.active-mode { background: #5a3a10; border-color: #c8a96e; color: #f0d898; }
+  .separator { width: 1px; height: 20px; background: #4a3a28; margin: 0 2px; }
+
+  /* Tooltip couleur transparence */
+  .thresh-row { display: flex; align-items: center; gap: 8px; }
+  .thresh-row input[type="range"] {
+    flex: 1; accent-color: #c8a96e; cursor: pointer;
+  }
+  .thresh-val { font-size: 12px; color: #c8a96e; min-width: 28px; text-align: right; }
+
+  .color-preview {
+    display: flex; gap: 4px; margin-top: 4px;
+  }
+  .cp { width: 16px; height: 16px; border: 1px solid #4a3a28; border-radius: 2px; cursor: pointer; }
+  .cp.active { border-color: #c8a96e; box-shadow: 0 0 0 2px #c8a96e44; }
+
+  .tag { display: inline-block; background: #5a3a10; border: 1px solid #8a6a30; border-radius: 3px; padding: 1px 6px; font-size: 10px; color: #c8a96e; }
+
+  .worldfile-info { font-size: 10px; color: #6a5a4a; font-style: italic; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <span class="toolbar-title">⊕ Plans Anciens</span>
+
+  <!-- Couches XYZ — sources avec CORS ouvert -->
+  <button class="btn" onclick="addXYZLayer('osm','OpenStreetMap','https://tile.openstreetmap.org/{z}/{x}/{y}.png')">OSM</button>
+  <button class="btn" onclick="addXYZLayer('etatmajor','État-Major 1820-66','https://wxs.ign.fr/cartes/geoportail/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.ETATMAJOR40&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}')">État-Major IGN</button>
+  <button class="btn" onclick="addXYZLayer('cassini','Cassini IGN','https://wxs.ign.fr/cartes/geoportail/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.CASSINI&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}')">Cassini IGN</button>
+  <button class="btn" onclick="addXYZLayer('ignsat','IGN Satellite','https://wxs.ign.fr/satellite/geoportail/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}')">Ortho IGN</button>
+
+  <div class="separator"></div>
+
+  <!-- URL XYZ personnalisée -->
+  <input type="text" id="custom-xyz-url" placeholder="URL XYZ personnalisée…https://…/{z}/{x}/{y}.png"
+    style="width:280px; background:#1e1810; border:1px solid #4a3a28; border-radius:4px; color:#e8dcc8; padding:5px 8px; font-size:11px; font-family:Georgia,serif;">
+  <input type="text" id="custom-xyz-name" placeholder="Nom"
+    style="width:90px; background:#1e1810; border:1px solid #4a3a28; border-radius:4px; color:#e8dcc8; padding:5px 8px; font-size:11px; font-family:Georgia,serif;">
+  <button class="btn" onclick="addCustomXYZ()">+ Ajouter</button>
+
+  <div class="separator"></div>
+
+  <button class="btn primary" onclick="toggleGeoPanel()">⊕ Géoréférencer une image</button>
+  <button class="btn" onclick="toggleLayersPanel()">☰ Couches</button>
+</div>
+
+<div id="map"></div>
+
+<!-- Panel Géoréférencement -->
+<div id="geo-panel">
+  <div class="panel-header">
+    <span>Import plan géoréférencé</span>
+    <span class="panel-close" onclick="toggleGeoPanel()">✕</span>
+  </div>
+  <div class="panel-body">
+
+    <div class="field-group">
+      <div class="field-label">Image (JPG, TIFF, PNG)</div>
+      <div class="drop-zone" id="img-drop" onclick="document.getElementById('img-input').click()">
+        Glisser l'image ici ou cliquer<br>
+        <span style="font-size:10px; color:#5a4a3a;">JPG · PNG · TIF</span>
+      </div>
+      <input type="file" id="img-input" accept=".jpg,.jpeg,.JPG,.JPEG,.png,.PNG,.tif,.tiff,.TIF,.TIFF" style="display:none">
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">Fichier World (JGW, TFW, TFWX, JGWX, JPW…)</div>
+      <div class="drop-zone" id="wf-drop" onclick="document.getElementById('wf-input').click()">
+        Glisser le worldfile ici ou cliquer<br>
+        <span style="font-size:10px; color:#5a4a3a;">JGW · TFW · TFWX · JGWX · JPW · PGW · WLD</span>
+      </div>
+      <input type="file" id="wf-input" accept=".jgw,.JGW,.tfw,.TFW,.tfwx,.TFWX,.jgwx,.JGWX,.jpw,.JPW,.pgw,.PGW,.wld,.WLD,.tab,.TAB" style="display:none">
+      <div class="worldfile-info" id="wf-info"></div>
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">Projection source</div>
+      <select id="proj-select">
+        <option value="4326">WGS 84 (EPSG:4326) — degrés décimaux</option>
+        <option value="2154" selected>RGF93 / Lambert-93 (EPSG:2154)</option>
+        <option value="27572">NTF Lambert IIe (EPSG:27572)</option>
+        <option value="27571">NTF Lambert Ie (EPSG:27571)</option>
+        <option value="27573">NTF Lambert IIIe (EPSG:27573)</option>
+        <option value="27574">NTF Lambert IVe (EPSG:27574)</option>
+        <option value="3857">WebMercator (EPSG:3857)</option>
+        <option value="custom">Personnalisée (proj4)</option>
+      </select>
+    </div>
+
+    <div class="field-group" id="custom-proj-group" style="display:none">
+      <div class="field-label">Définition Proj4</div>
+      <input type="text" id="custom-proj" placeholder="+proj=lcc +lat_0=… +lon_0=…">
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">Nom du dossier de tuiles</div>
+      <input type="text" id="folder-name" value="plan_ancien" placeholder="ex: TA_section_12, trudaine_berry…">
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">Niveaux de zoom à générer</div>
+      <div class="row2">
+        <div>
+          <div class="field-label">Min</div>
+          <input type="number" id="zoom-min" value="12" min="0" max="20">
+        </div>
+        <div>
+          <div class="field-label">Max</div>
+          <input type="number" id="zoom-max" value="17" min="0" max="20">
+        </div>
+      </div>
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">Transparence des bordures</div>
+      <div style="margin-bottom:6px; font-size:11px; color:#7a6a5a;">
+        Les pixels de remplissage (blanc / noir) hors du plan seront rendus transparents dans les tuiles PNG.
+      </div>
+
+      <div class="field-label" style="margin-top:8px;">Couleur(s) à ignorer</div>
+      <div class="color-preview">
+        <div class="cp active" style="background:#ffffff" title="Blanc" onclick="toggleColor(this,'white')"></div>
+        <div class="cp active" style="background:#000000" title="Noir" onclick="toggleColor(this,'black')"></div>
+        <div class="cp" style="background:#e0e0e0" title="Gris clair" onclick="toggleColor(this,'lightgray')"></div>
+        <div class="cp" style="background:#404040" title="Gris foncé" onclick="toggleColor(this,'darkgray')"></div>
+      </div>
+
+      <div class="field-label" style="margin-top:8px;">Tolérance (0 = exact, 40 = large)</div>
+      <div class="thresh-row">
+        <input type="range" id="thresh" min="0" max="80" value="25" oninput="document.getElementById('thresh-val').textContent=this.value">
+        <span class="thresh-val" id="thresh-val">25</span>
+      </div>
+
+      <div class="field-label" style="margin-top:8px;">Érosion du masque (px)</div>
+      <div class="thresh-row">
+        <input type="range" id="erode" min="0" max="20" value="3" oninput="document.getElementById('erode-val').textContent=this.value">
+        <span class="thresh-val" id="erode-val">3</span>
+      </div>
+    </div>
+
+    <div class="field-group" id="registry-info" style="display:none">
+      <div class="info-box" style="border-color:#6a8a4a;">
+        <span style="color:#9aba7a">⊕ Fusion active</span> — <span id="registry-count">0</span> tuile(s) en mémoire depuis le plan précédent.<br>
+        Les zones communes seront fusionnées automatiquement.
+        <div style="margin-top:6px;">
+          <button class="btn" onclick="clearRegistry()" style="font-size:10px;padding:3px 8px;">✕ Vider le registre</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="field-group">
+      <div class="info-box" id="geo-info">Chargez une image et son worldfile pour voir les informations de géoréférencement.</div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:4px;">
+      <button class="btn primary" id="generate-btn" onclick="startTiling(false)" disabled style="padding:10px; text-align:center;">
+        ⊕ Générer<br><span style="font-size:10px;">sans télécharger</span>
+      </button>
+      <button class="btn primary" id="generate-dl-btn" onclick="startTiling(true)" disabled style="padding:10px; text-align:center; border-color:#f0d898;">
+        ⊕ Générer<br><span style="font-size:10px;">+ télécharger ZIP</span>
+      </button>
+    </div>
+    <div style="font-size:10px; color:#5a4a4a; margin-top:6px; text-align:center;">
+      Traitement 100% local dans le navigateur · Aucune donnée envoyée
+    </div>
+
+    <!-- Fusion avec toutes les couches affichées -->
+    <div class="field-group" id="fusion-layers-group" style="margin-top:10px;">
+      <div class="field-label" style="color:#c8a96e;">Fusionner avec les couches affichées</div>
+      <div style="font-size:10px; color:#7a6a5a; margin-bottom:6px;">
+        Cochez les couches à composer sous votre TIF (dans l'ordre affiché).
+      </div>
+      <div id="fusion-layers-list">
+        <div style="font-size:11px;color:#5a4a3a;font-style:italic;">Aucune couche disponible</div>
+      </div>
+      <button class="btn" onclick="renderFusionLayersList()" style="margin-top:5px;font-size:10px;padding:3px 8px;">↺ Rafraîchir</button>
+    </div>
+
+    <!-- ── Export image assemblée ── -->
+    <div id="export-section" style="display:none; margin-top:14px; border-top:1px solid #3a2e1a; padding-top:12px;">
+      <div class="field-label" style="color:#c8a96e; font-size:12px; margin-bottom:8px;">⬇ Exporter l'image assemblée</div>
+
+      <div class="field-group">
+        <div class="field-label">Zoom de référence pour l'export</div>
+        <select id="export-zoom">
+          <!-- rempli dynamiquement -->
+        </select>
+        <div style="font-size:10px;color:#6a5a4a;margin-top:3px;" id="export-size-info"></div>
+      </div>
+
+      <div class="field-group">
+        <div class="field-label">Projection du worldfile JPW</div>
+        <select id="export-proj">
+          <option value="4326">WGS 84 (EPSG:4326) — degrés décimaux</option>
+          <option value="2154" selected>RGF93 / Lambert-93 (EPSG:2154)</option>
+          <option value="27572">NTF Lambert IIe (EPSG:27572)</option>
+          <option value="27571">NTF Lambert Ie (EPSG:27571)</option>
+          <option value="27573">NTF Lambert IIIe (EPSG:27573)</option>
+          <option value="27574">NTF Lambert IVe (EPSG:27574)</option>
+          <option value="3857">WebMercator (EPSG:3857)</option>
+          <option value="custom">Personnalisée (proj4)</option>
+        </select>
+      </div>
+      <div class="field-group" id="export-custom-proj-group" style="display:none">
+        <div class="field-label">Définition Proj4</div>
+        <input type="text" id="export-custom-proj" placeholder="+proj=lcc +lat_0=… +lon_0=…">
+      </div>
+
+      <div class="field-group">
+        <div class="field-label">Qualité JPG (60–100)</div>
+        <div class="thresh-row">
+          <input type="range" id="export-quality" min="60" max="100" value="90"
+            oninput="document.getElementById('export-quality-val').textContent=this.value">
+          <span class="thresh-val" id="export-quality-val">90</span>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="field-label">Fond pour les zones transparentes</div>
+        <select id="export-bg">
+          <option value="white" selected>Blanc</option>
+          <option value="black">Noir</option>
+          <option value="#f5f0e8">Crème (papier)</option>
+        </select>
+      </div>
+
+      <button class="btn primary" id="export-btn" onclick="exportAssembledImage()" style="width:100%;padding:9px;">
+        ⬇ Télécharger JPG + JPW
+      </button>
+    </div>
+  </div>
+
+  <div id="progress-area">
+    <div class="progress-text" id="progress-label">Initialisation…</div>
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+    <div class="progress-text" id="progress-detail"></div>
+  </div>
+</div>
+
+<!-- Panel Couches -->
+<div id="layers-panel">
+  <div class="panel-header" style="cursor:pointer" onclick="toggleLayersPanel()">
+    <span>Couches actives</span>
+    <span style="color:#8a7a6a; font-size:12px;">✕</span>
+  </div>
+  <div id="layers-list" style="overflow-y:auto;"></div>
+</div>
+
+<div id="notif"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
+<script>
+// ─── Carte Leaflet ───────────────────────────────────────────────────────────
+const map = L.map('map', { center: [46.5, 2.5], zoom: 6 });
+
+// Fond de carte minimal
+const baseLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap',
+  opacity: 0.4
+}).addTo(map);
+
+// Gestion des couches
+const layers = {};
+
+function addXYZLayer(id, name, url) {
+  if (layers[id]) { notify('Couche déjà présente : ' + name); return; }
+  const layer = L.tileLayer(url, { maxZoom: 18, opacity: 0.85, crossOrigin: '' });
+  layer.addTo(map);
+  layers[id] = { layer, name, visible: true };
+  renderLayersList();
+  notify('Couche ajoutée : ' + name);
+}
+
+function addCustomXYZ() {
+  const url = document.getElementById('custom-xyz-url').value.trim();
+  const name = document.getElementById('custom-xyz-name').value.trim() || 'Couche perso';
+  if (!url) { notify('Entrez une URL XYZ valide'); return; }
+  if (!url.includes('{z}') || !url.includes('{x}') || !url.includes('{y}')) {
+    notify('URL doit contenir {z}, {x}, {y}'); return;
+  }
+  const id = 'custom_' + Date.now();
+  addXYZLayer(id, name, url);
+  document.getElementById('custom-xyz-url').value = '';
+  document.getElementById('custom-xyz-name').value = '';
+}
+
+function renderLayersList() {
+  const list = document.getElementById('layers-list');
+  const keys = Object.keys(layers);
+  if (!keys.length) { list.innerHTML = '<div style="padding:10px;font-size:11px;color:#5a4a3a;">Aucune couche</div>'; return; }
+  list.innerHTML = keys.map(id => `
+    <div class="layer-item">
+      <div class="layer-toggle ${layers[id].visible ? '' : 'off'}" onclick="toggleLayer('${id}')"></div>
+      <span class="layer-name" title="${layers[id].name}">${layers[id].name}</span>
+      <span class="layer-del" onclick="removeLayer('${id}')">✕</span>
+    </div>
+  `).join('');
+}
+
+function toggleLayer(id) {
+  const l = layers[id];
+  l.visible = !l.visible;
+  l.visible ? map.addLayer(l.layer) : map.removeLayer(l.layer);
+  renderLayersList();
+}
+
+function removeLayer(id) {
+  map.removeLayer(layers[id].layer);
+  delete layers[id];
+  renderLayersList();
+}
+
+// ─── UI ─────────────────────────────────────────────────────────────────────
+function toggleGeoPanel() {
+  document.getElementById('geo-panel').classList.toggle('visible');
+}
+function toggleLayersPanel() {
+  const p = document.getElementById('layers-panel');
+  p.classList.toggle('visible');
+  if (p.classList.contains('visible')) renderLayersList();
+}
+
+document.getElementById('proj-select').addEventListener('change', function() {
+  document.getElementById('custom-proj-group').style.display = this.value === 'custom' ? 'block' : 'none';
+});
+
+// Notification
+let notifTimer;
+function notify(msg) {
+  const el = document.getElementById('notif');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(notifTimer);
+  notifTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ─── Gestion des couleurs à ignorer ──────────────────────────────────────────
+const colorTargets = {
+  white: [255, 255, 255],
+  black: [0, 0, 0],
+  lightgray: [224, 224, 224],
+  darkgray: [64, 64, 64]
+};
+const activeColors = new Set(['white', 'black']);
+
+function toggleColor(el, name) {
+  if (activeColors.has(name)) { activeColors.delete(name); el.classList.remove('active'); }
+  else { activeColors.add(name); el.classList.add('active'); }
+}
+
+// ─── Chargement fichiers ─────────────────────────────────────────────────────
+let imgFile = null, imgBitmap = null;
+let worldfileData = null;
+
+function setupDrop(dropId, inputId, handler) {
+  const drop = document.getElementById(dropId);
+  const input = document.getElementById(inputId);
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('dragover'); handler(e.dataTransfer.files[0]); });
+  input.addEventListener('change', () => handler(input.files[0]));
+}
+
+setupDrop('img-drop', 'img-input', async (file) => {
+  if (!file) return;
+  imgFile = file;
+  const drop = document.getElementById('img-drop');
+  drop.textContent = '⏳ Chargement ' + file.name + '…';
+  drop.classList.add('has-file');
+
+  try {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (ext === 'tif' || ext === 'tiff') {
+      drop.textContent = '⏳ Décodage TIFF…';
+      await sleep(10);
+
+      // Essai 1 : createImageBitmap natif (Chrome 94+ supporte TIFF basique)
+      let loaded = false;
+      try {
+        const url = URL.createObjectURL(file);
+        imgBitmap = await createImageBitmap(await fetch(url).then(r => r.blob()));
+        URL.revokeObjectURL(url);
+        loaded = true;
+      } catch(e1) { /* pas supporté nativement */ }
+
+      // Essai 2 : geotiff.js
+      if (!loaded) {
+        const arrayBuffer = await file.arrayBuffer();
+        const GT = window.GeoTIFF || window.geotiff;
+        if (!GT) throw new Error('geotiff.js non chargé');
+
+        const tiff = await GT.fromArrayBuffer(arrayBuffer);
+        const image = await tiff.getImage();
+        const W = image.getWidth(), H = image.getHeight();
+        const spp = image.getSamplesPerPixel();
+
+        drop.textContent = `⏳ Rendu ${W}×${H} px (${spp} bande${spp>1?'s':''})…`;
+        await sleep(10);
+
+        let rasters;
+        try {
+          rasters = await image.readRasters({ interleave: true });
+        } catch(e) {
+          rasters = await image.readRasters();
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.createImageData(W, H);
+        const px = imgData.data;
+        const n = W * H;
+
+        if (Array.isArray(rasters)) {
+          // Bandes séparées
+          const R = rasters[0], G = rasters[1] || rasters[0], B = rasters[2] || rasters[0];
+          for (let i = 0; i < n; i++) {
+            px[i*4]   = R[i] > 255 ? R[i] >> 8 : R[i];
+            px[i*4+1] = G[i] > 255 ? G[i] >> 8 : G[i];
+            px[i*4+2] = B[i] > 255 ? B[i] >> 8 : B[i];
+            px[i*4+3] = 255;
+          }
+        } else {
+          // Interleaved — détection automatique du nombre de canaux
+          const step = Math.floor(rasters.length / n);
+          for (let i = 0; i < n; i++) {
+            const v0 = rasters[i*step];
+            if (step >= 3) {
+              const v1 = rasters[i*step+1], v2 = rasters[i*step+2];
+              px[i*4]   = v0 > 255 ? v0 >> 8 : v0;
+              px[i*4+1] = v1 > 255 ? v1 >> 8 : v1;
+              px[i*4+2] = v2 > 255 ? v2 >> 8 : v2;
+            } else {
+              const g = v0 > 255 ? v0 >> 8 : v0;
+              px[i*4] = px[i*4+1] = px[i*4+2] = g;
+            }
+            px[i*4+3] = (step >= 4) ? (rasters[i*step+3] > 255 ? rasters[i*step+3]>>8 : rasters[i*step+3]) : 255;
+          }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        imgBitmap = await createImageBitmap(canvas);
+      }
+
+    } else {
+      // JPG / PNG natif
+      const url = URL.createObjectURL(file);
+      imgBitmap = await createImageBitmap(await fetch(url).then(r => r.blob()));
+      URL.revokeObjectURL(url);
+    }
+
+    drop.textContent = '✓ ' + file.name + ' (' + imgBitmap.width + '×' + imgBitmap.height + ' px)';
+    updateGeoInfo();
+    checkReady();
+  } catch(e) {
+    drop.textContent = '✗ Erreur : ' + e.message;
+    drop.classList.remove('has-file');
+    imgBitmap = null;
+    console.error('Erreur chargement TIFF :', e);
+    notify('Erreur : ' + e.message + ' — Essayez de convertir en JPG/PNG');
+    checkReady();
+  }
+});
+
+setupDrop('wf-drop', 'wf-input', async (file) => {
+  if (!file) return;
+  const text = await file.text();
+  worldfileData = parseWorldfile(text);
+  const drop = document.getElementById('wf-drop');
+  drop.textContent = '✓ ' + file.name;
+  drop.classList.add('has-file');
+  document.getElementById('wf-info').textContent =
+    worldfileData ? `A=${worldfileData.A.toExponential(4)} E=${worldfileData.E.toExponential(4)} Xo=${worldfileData.C.toFixed(2)} Yo=${worldfileData.F.toFixed(2)}` : 'Lecture impossible';
+  updateGeoInfo();
+  checkReady();
+});
+
+function parseWorldfile(text) {
+  const lines = text.trim().split(/\r?\n/).map(l => parseFloat(l.trim())).filter(n => !isNaN(n));
+  if (lines.length < 6) return null;
+  // Format standard worldfile : A D B E C F
+  return { A: lines[0], D: lines[1], B: lines[2], E: lines[3], C: lines[4], F: lines[5] };
+}
+
+function checkReady() {
+  const ok = !!(imgBitmap && worldfileData);
+  document.getElementById('generate-btn').disabled = !ok;
+  document.getElementById('generate-dl-btn').disabled = !ok;
+}
+
+// ─── Projections ─────────────────────────────────────────────────────────────
+const PROJ_DEFS = {
+  '4326': '+proj=longlat +datum=WGS84 +no_defs',
+  '2154': '+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=49 +lat_2=44 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+  '27572': '+proj=lcc +lat_1=46.8 +lat_0=46.8 +lon_0=2.33722917 +k_0=0.99987742 +x_0=600000 +y_0=2200000 +a=6378249.2 +b=6356515 +towgs84=-168,-60,320,0,0,0,0 +pm=paris +units=m +no_defs',
+  '27571': '+proj=lcc +lat_1=49.5 +lat_0=49.5 +lon_0=2.33722917 +k_0=0.999877341 +x_0=600000 +y_0=1200000 +a=6378249.2 +b=6356515 +towgs84=-168,-60,320,0,0,0,0 +pm=paris +units=m +no_defs',
+  '27573': '+proj=lcc +lat_1=44.1 +lat_0=44.1 +lon_0=2.33722917 +k_0=0.999877499 +x_0=600000 +y_0=3200000 +a=6378249.2 +b=6356515 +towgs84=-168,-60,320,0,0,0,0 +pm=paris +units=m +no_defs',
+  '27574': '+proj=lcc +lat_1=42.165 +lat_0=42.165 +lon_0=2.33722917 +k_0=0.99994471 +x_0=234.358 +y_0=4185861.369 +a=6378249.2 +b=6356515 +towgs84=-168,-60,320,0,0,0,0 +pm=paris +units=m +no_defs',
+  '3857': '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +no_defs'
+};
+
+function getProjDef() {
+  const sel = document.getElementById('proj-select').value;
+  if (sel === 'custom') return document.getElementById('custom-proj').value;
+  return PROJ_DEFS[sel] || PROJ_DEFS['2154'];
+}
+
+// Coordonnée pixel → WGS84
+function pixelToWGS84(px, py, wf, projDef) {
+  // Worldfile: X_geo = A*px + B*py + C, Y_geo = D*px + E*py + F
+  const xGeo = wf.A * px + wf.B * py + wf.C;
+  const yGeo = wf.D * px + wf.E * py + wf.F;
+  const wgs84 = '+proj=longlat +datum=WGS84 +no_defs';
+  const [lon, lat] = proj4(projDef, wgs84, [xGeo, yGeo]);
+  return [lon, lat];
+}
+
+// ─── Calcul de l'emprise et centrage ─────────────────────────────────────────
+function updateGeoInfo() {
+  if (!imgBitmap || !worldfileData) return;
+  const projDef = getProjDef();
+  const W = imgBitmap.width, H = imgBitmap.height;
+  const corners = [[0,0],[W,0],[W,H],[0,H]];
+  try {
+    const wgs = corners.map(([px,py]) => pixelToWGS84(px+0.5, py+0.5, worldfileData, projDef));
+    const lons = wgs.map(c=>c[0]), lats = wgs.map(c=>c[1]);
+    const bounds = [[Math.min(...lats),Math.min(...lons)],[Math.max(...lats),Math.max(...lons)]];
+    document.getElementById('geo-info').innerHTML =
+      `<b style="color:#c8a96e">Emprise détectée :</b><br>` +
+      `${W}×${H} px · ${(worldfileData.A > 0 ? worldfileData.A : -worldfileData.E).toFixed(4)} m/px<br>` +
+      `N ${Math.max(...lats).toFixed(5)}° · S ${Math.min(...lats).toFixed(5)}°<br>` +
+      `O ${Math.min(...lons).toFixed(5)}° · E ${Math.max(...lons).toFixed(5)}°`;
+    map.fitBounds(bounds, { padding: [40, 40] });
+    // Aperçu du rectangle
+    if (window._previewRect) map.removeLayer(window._previewRect);
+    window._previewRect = L.rectangle(bounds, { color: '#c8a96e', weight: 1, fill: false, dashArray: '4,4' }).addTo(map);
+  } catch(e) {
+    document.getElementById('geo-info').textContent = 'Erreur de projection : ' + e.message;
+  }
+}
+
+// ─── Conversion XYZ ──────────────────────────────────────────────────────────
+function lonLatToTile(lon, lat, zoom) {
+  const n = Math.pow(2, zoom);
+  const x = Math.floor((lon + 180) / 360 * n);
+  const latRad = lat * Math.PI / 180;
+  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * n);
+  return [x, y];
+}
+
+function tileToBBox(x, y, z) {
+  const n = Math.pow(2, z);
+  const lonMin = x / n * 360 - 180;
+  const lonMax = (x+1) / n * 360 - 180;
+  const latMax = Math.atan(Math.sinh(Math.PI * (1 - 2*y/n))) * 180/Math.PI;
+  const latMin = Math.atan(Math.sinh(Math.PI * (1 - 2*(y+1)/n))) * 180/Math.PI;
+  return { lonMin, lonMax, latMin, latMax };
+}
+
+// ─── Test transparence pixel ──────────────────────────────────────────────────
+function isBackground(r, g, b, threshold) {
+  for (const colorName of activeColors) {
+    const [tr, tg, tb] = colorTargets[colorName];
+    if (Math.abs(r-tr) <= threshold && Math.abs(g-tg) <= threshold && Math.abs(b-tb) <= threshold) return true;
+  }
+  return false;
+}
+
+// ─── Flood-fill depuis les 4 bords pour masquer le fond ─────────────────────
+// Bien plus précis qu'un seuil global : ne touche pas aux zones blanches
+// intérieures au plan (papier blanc, cartouches, etc.)
+function floodFillBorders(data, width, height, threshold) {
+  const visited = new Uint8Array(width * height);
+  const queue = [];
+
+  function enqueue(x, y) {
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    const idx = y * width + x;
+    if (visited[idx]) return;
+    const p = idx * 4;
+    if (!isBackground(data[p], data[p+1], data[p+2], threshold)) return;
+    visited[idx] = 1;
+    queue.push(idx);
+  }
+
+  // Amorcer depuis les 4 bords
+  for (let x = 0; x < width; x++)  { enqueue(x, 0); enqueue(x, height-1); }
+  for (let y = 0; y < height; y++) { enqueue(0, y); enqueue(width-1, y); }
+
+  // BFS itératif
+  let head = 0;
+  while (head < queue.length) {
+    const idx = queue[head++];
+    const x = idx % width, y = Math.floor(idx / width);
+    data[idx*4+3] = 0; // transparent
+    enqueue(x+1, y); enqueue(x-1, y);
+    enqueue(x, y+1); enqueue(x, y-1);
+  }
+}
+
+// ─── Érosion du bord du masque (retire N pixels sur le pourtour transparent) ─
+function erodeTransparency(data, width, height, radius) {
+  if (radius <= 0) return;
+  // 1 passe par pixel de rayon (plus rapide qu'un voisinage carré complet)
+  for (let pass = 0; pass < radius; pass++) {
+    const copy = new Uint8ClampedArray(data.length);
+    for (let i = 3; i < data.length; i += 4) copy[i] = data[i];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        if (copy[idx+3] === 0) continue;
+        // transparent dans les 4 voisins directs ?
+        const hasT =
+          (x > 0         && copy[((y)*width+(x-1))*4+3] === 0) ||
+          (x < width-1   && copy[((y)*width+(x+1))*4+3] === 0) ||
+          (y > 0         && copy[((y-1)*width+x)*4+3]   === 0) ||
+          (y < height-1  && copy[((y+1)*width+x)*4+3]   === 0);
+        if (hasT) data[idx+3] = 0;
+      }
+    }
+  }
+}
+
+// ─── Registre global des tuiles déjà générées (fusion inter-plans) ───────────
+// Clé : "folderName/z/x/y" → ImageBitmap de la tuile existante
+const globalTileRegistry = {};
+
+// ─── Tuilage principal ───────────────────────────────────────────────────────
+let tilingAborted = false;
+
+async function startTiling(doDownload = false) {
+  if (!imgBitmap || !worldfileData) return;
+  tilingAborted = false;
+
+  const projDef = getProjDef();
+  const folderName = document.getElementById('folder-name').value.trim() || 'plan_ancien';
+  const zMin = parseInt(document.getElementById('zoom-min').value);
+  const zMax = parseInt(document.getElementById('zoom-max').value);
+  const threshold = parseInt(document.getElementById('thresh').value);
+  const erodeRadius = parseInt(document.getElementById('erode').value);
+  const TILE_SIZE = 256;
+
+  document.getElementById('generate-btn').disabled = true;
+  document.getElementById('generate-dl-btn').disabled = true;
+  const pa = document.getElementById('progress-area');
+  pa.classList.add('visible');
+
+  function setProgress(pct, label, detail='') {
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-label').textContent = label;
+    document.getElementById('progress-detail').textContent = detail;
+  }
+
+  setProgress(2, 'Chargement de l\'image source…');
+  await sleep(20);
+
+  const W = imgBitmap.width, H = imgBitmap.height;
+  const wf = worldfileData;
+  const det = wf.A * wf.E - wf.B * wf.D;
+  const wgs84def = '+proj=longlat +datum=WGS84 +no_defs';
+
+  function wgs84ToPixel(lon, lat) {
+    const [xGeo, yGeo] = proj4(wgs84def, projDef, [lon, lat]);
+    const px = (wf.E*(xGeo - wf.C) - wf.B*(yGeo - wf.F)) / det;
+    const py = (wf.A*(yGeo - wf.F) - wf.D*(xGeo - wf.C)) / det;
+    return [px, py];
+  }
+
+  const allTiles = [];
+  for (let z = zMin; z <= zMax; z++) {
+    const wgsCorners = [[0,0],[W,0],[W,H],[0,H]].map(([px,py]) => pixelToWGS84(px, py, wf, projDef));
+    const lons = wgsCorners.map(c=>c[0]), lats = wgsCorners.map(c=>c[1]);
+    const [txMin, tyMin] = lonLatToTile(Math.min(...lons), Math.max(...lats), z);
+    const [txMax, tyMax] = lonLatToTile(Math.max(...lons), Math.min(...lats), z);
+    for (let tx = txMin; tx <= txMax; tx++)
+      for (let ty = tyMin; ty <= tyMax; ty++)
+        allTiles.push([z, tx, ty]);
+  }
+
+  setProgress(5, `${allTiles.length} tuiles à générer…`);
+  await sleep(30);
+
+  if (allTiles.length > 50000) {
+    if (!confirm(`Attention : ${allTiles.length} tuiles. Continuer ?`)) {
+      pa.classList.remove('visible');
+      document.getElementById('generate-btn').disabled = false;
+      return;
+    }
+  }
+
+  const zip = new JSZip();
+  let generatedCount = 0, skippedCount = 0, mergedCount = 0;
+
+  const renderCanvas = document.createElement('canvas');
+  renderCanvas.width = TILE_SIZE; renderCanvas.height = TILE_SIZE;
+  const rCtx = renderCanvas.getContext('2d');
+
+  const readCanvas = document.createElement('canvas');
+  readCanvas.width = TILE_SIZE; readCanvas.height = TILE_SIZE;
+  const rdCtx = readCanvas.getContext('2d', { willReadFrequently: true });
+
+  // Canvas de fusion : pour composer l'ancienne tuile + la nouvelle
+  const mergeCanvas = document.createElement('canvas');
+  mergeCanvas.width = TILE_SIZE; mergeCanvas.height = TILE_SIZE;
+  const mCtx = mergeCanvas.getContext('2d', { willReadFrequently: true });
+
+  function computeTileTransform(bbox) {
+    const [sx0, sy0] = wgs84ToPixel(bbox.lonMin, bbox.latMax);
+    const [sx1, sy1] = wgs84ToPixel(bbox.lonMax, bbox.latMax);
+    const [sx2, sy2] = wgs84ToPixel(bbox.lonMin, bbox.latMin);
+    const a = (sx1-sx0)/TILE_SIZE, b = (sy1-sy0)/TILE_SIZE;
+    const c = (sx2-sx0)/TILE_SIZE, d = (sy2-sy0)/TILE_SIZE;
+    const e = sx0, f = sy0;
+    return { a, b, c, d, e, f };
+  }
+
+  function invertAffine({a, b, c, d, e, f}) {
+    const det2 = a*d - b*c;
+    if (Math.abs(det2) < 1e-12) return null;
+    const ia = d/det2, ib = -b/det2, ic = -c/det2, id = a/det2;
+    const ie = (c*f - d*e)/det2, if_ = (b*e - a*f)/det2;
+    return { a: ia, b: ib, c: ic, d: id, e: ie, f: if_ };
+  }
+
+  const BATCH = 40;
+  for (let i = 0; i < allTiles.length; i += BATCH) {
+    if (tilingAborted) break;
+    const batch = allTiles.slice(i, Math.min(i+BATCH, allTiles.length));
+
+    for (const [z, tx, ty] of batch) {
+      const bbox = tileToBBox(tx, ty, z);
+
+      const [px0,py0] = wgs84ToPixel(bbox.lonMin, bbox.latMax);
+      const [px1,py1] = wgs84ToPixel(bbox.lonMax, bbox.latMin);
+      if (Math.max(px0,px1)<0 || Math.max(py0,py1)<0 ||
+          Math.min(px0,px1)>W || Math.min(py0,py1)>H) {
+        skippedCount++; continue;
+      }
+
+      const fwd = computeTileTransform(bbox);
+      const inv = invertAffine(fwd);
+      if (!inv) { skippedCount++; continue; }
+
+      // ── Rendu GPU de la nouvelle image ────────────────────────────────────
+      rCtx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+      rCtx.save();
+      rCtx.setTransform(inv.a, inv.b, inv.c, inv.d, inv.e, inv.f);
+      rCtx.drawImage(imgBitmap, 0, 0);
+      rCtx.restore();
+
+      rdCtx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+      rdCtx.drawImage(renderCanvas, 0, 0);
+
+      const imageData = rdCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
+      const data = imageData.data;
+
+      // Flood-fill : effacer le fond de bordure de la nouvelle image
+      floodFillBorders(data, TILE_SIZE, TILE_SIZE, threshold);
+
+      let hasContent = false;
+      for (let p = 3; p < data.length; p += 4) {
+        if (data[p] > 0) { hasContent = true; break; }
+      }
+      if (!hasContent) { skippedCount++; continue; }
+
+      if (erodeRadius > 0) erodeTransparency(data, TILE_SIZE, TILE_SIZE, erodeRadius);
+
+      hasContent = false;
+      for (let p = 3; p < data.length; p += 4) {
+        if (data[p] > 0) { hasContent = true; break; }
+      }
+      if (!hasContent) { skippedCount++; continue; }
+
+      // ── Fusion : toutes les couches cochées (XYZ + locales) ──────────────────
+      // Ordre : couches cochées (fond) → TIF courant (dessus)
+      if (fusionSelected.size > 0) {
+        mCtx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+        for (const layerId of fusionSelected) {
+          const fuseBmp = await getFusionTile(layerId, z, tx, ty);
+          if (fuseBmp) mCtx.drawImage(fuseBmp, 0, 0);
+        }
+        rdCtx.putImageData(imageData, 0, 0);
+        mCtx.drawImage(readCanvas, 0, 0);
+        rdCtx.putImageData(mCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE), 0, 0);
+      } else {
+        rdCtx.putImageData(imageData, 0, 0);
+      }
+
+      // ── Fusion avec une tuile existante du même dossier (plans TIF précédents) ─
+      const regKey = `${folderName}/${z}/${tx}/${ty}`;
+      const existingBitmap = globalTileRegistry[regKey];
+
+      if (existingBitmap) {
+        mCtx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+        mCtx.drawImage(existingBitmap, 0, 0);
+        mCtx.drawImage(readCanvas, 0, 0);
+        const mergedData = mCtx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
+        rdCtx.putImageData(mergedData, 0, 0);
+        mergedCount++;
+      }
+
+      // Encoder PNG final
+      const blob = await new Promise(res => readCanvas.toBlob(res, 'image/png'));
+      const ab = await blob.arrayBuffer();
+      zip.file(`${folderName}/${z}/${tx}/${ty}.png`, ab);
+
+      // Mettre à jour le registre
+      globalTileRegistry[regKey] = await createImageBitmap(blob);
+
+      generatedCount++;
+    }
+
+    const pct = 5 + Math.round(i / allTiles.length * 89);
+    const remaining = Math.max(0, allTiles.length - i - BATCH);
+    const mergeInfo = mergedCount > 0 ? ` · ${mergedCount} fusionnées` : '';
+    setProgress(pct, `Génération des tuiles…`,
+      `${generatedCount} générées · ${skippedCount} vides · ${remaining} restantes${mergeInfo}`);
+    await sleep(0);
+  }
+
+  // ── ZIP : un seul dossier, toutes les tuiles du registre avec fusion ─────────
+  if (doDownload) {
+    setProgress(92, 'Préparation du ZIP…');
+    await sleep(20);
+
+    const zipFinal = new JSZip();
+    const leafletSnippet = generateLeafletSnippet(folderName, zMin, zMax);
+
+    // Toutes les tuiles du registre (tous plans confondus)
+    const regKeys = Object.keys(globalTileRegistry);
+    const total = regKeys.length;
+
+    // Canvas de composition réutilisé
+    const fc = document.createElement('canvas'); fc.width = 256; fc.height = 256;
+    const fctx = fc.getContext('2d', { willReadFrequently: true });
+
+    let done = 0;
+    for (const regKey of regKeys) {
+      // regKey = "folderName/z/x/y"
+      const parts = regKey.split('/');
+      const z = parseInt(parts[1]), tx = parseInt(parts[2]), ty = parseInt(parts[3]);
+
+      fctx.clearRect(0, 0, 256, 256);
+
+      // 1. Couches XYZ et locales cochées en fond (dans l'ordre de la liste)
+      if (fusionSelected.size > 0) {
+        for (const layerId of fusionSelected) {
+          // Ne pas se fusionner avec soi-même (tuile du registre courant)
+          const fuseBmp = await getFusionTile(layerId, z, tx, ty);
+          if (fuseBmp) fctx.drawImage(fuseBmp, 0, 0);
+        }
+      }
+
+      // 2. Tuile du registre (plan TIF) par-dessus
+      const regBmp = globalTileRegistry[regKey];
+      if (regBmp) fctx.drawImage(regBmp, 0, 0);
+
+      // Encoder PNG dans le ZIP — chemin : folderName/z/x/y.png
+      const blob = await new Promise(res => fc.toBlob(res, 'image/png'));
+      zipFinal.file(`${folderName}/${z}/${tx}/${ty}.png`, await blob.arrayBuffer());
+
+      done++;
+      if (done % 15 === 0) {
+        setProgress(92 + Math.round(done / total * 5), `Composition ZIP… ${done}/${total} tuiles`);
+        await sleep(0);
+      }
+    }
+
+    zipFinal.file(`${folderName}/README_leaflet.txt`, leafletSnippet);
+
+    setProgress(97, 'Compression ZIP…');
+    const zipBlob = await zipFinal.generateAsync(
+      { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+      m => setProgress(97 + Math.round(m.percent * 0.03), 'Compression… ' + Math.round(m.percent) + '%')
+    );
+
+    setProgress(100, 'Téléchargement…');
+    const dlUrl = URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
+    a.href = dlUrl;
+    a.download = `${folderName}_tiles_complet.zip`;
+    a.click();
+    URL.revokeObjectURL(dlUrl);
+
+    notify(`✓ ZIP téléchargé · ${total} tuiles · dossier : ${folderName}/`);
+  } else {
+    notify(`✓ ${generatedCount} générées · ${mergedCount} fusionnées · pas de téléchargement`);
+  }
+
+  addLocalTileLayer(folderName, zip, zMin, zMax, generatedCount);
+  updateRegistryInfo();
+  pa.classList.remove('visible');
+  document.getElementById('generate-btn').disabled = false;
+  document.getElementById('generate-dl-btn').disabled = false;
+}
+
+// ─── Fusion : cases à cocher sur toutes les couches ─────────────────────────
+// Set des IDs de couches sélectionnées pour la fusion
+const fusionSelected = new Set();
+
+function renderFusionLayersList() {
+  const list = document.getElementById('fusion-layers-list');
+  const allIds = Object.keys(layers);
+  if (!allIds.length) {
+    list.innerHTML = '<div style="font-size:11px;color:#5a4a3a;font-style:italic;">Aucune couche disponible</div>';
+    return;
+  }
+  list.innerHTML = allIds.map(id => {
+    const l = layers[id];
+    const isLocal = !l.url; // couche locale générée (pas d'URL distante)
+    const typeLabel = isLocal
+      ? '<span style="font-size:9px;color:#6a8a4a;margin-left:4px;">[local]</span>'
+      : '<span style="font-size:9px;color:#6a9aba;margin-left:4px;">[XYZ]</span>';
+    return `
+      <label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;border-bottom:1px solid #2a2018;">
+        <input type="checkbox" id="fuse-${id}"
+          ${fusionSelected.has(id) ? 'checked' : ''}
+          onchange="toggleFusion('${id}', this.checked)"
+          style="accent-color:#c8a96e;width:14px;height:14px;flex-shrink:0;">
+        <span style="color:#c8b898;font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+          title="${l.name}">${l.name}</span>
+        ${typeLabel}
+      </label>`;
+  }).join('');
+}
+
+function toggleFusion(id, checked) {
+  checked ? fusionSelected.add(id) : fusionSelected.delete(id);
+}
+
+// Rafraîchir la liste quand on ouvre le panel
+function toggleGeoPanel() {
+  document.getElementById('geo-panel').classList.toggle('visible');
+  if (document.getElementById('geo-panel').classList.contains('visible')) {
+    renderFusionLayersList();
+  }
+}
+
+// Stocker l'URL dans chaque couche XYZ
+function addXYZLayer(id, name, url) {
+  if (layers[id]) { notify('Couche déjà présente : ' + name); return; }
+  const layer = L.tileLayer(url, { maxZoom: 18, opacity: 0.85, crossOrigin: '' });
+  layer.addTo(map);
+  layers[id] = { layer, name, url, visible: true };
+  renderLayersList();
+  notify('Couche ajoutée : ' + name);
+}
+
+function addCustomXYZ() {
+  const url = document.getElementById('custom-xyz-url').value.trim();
+  const name = document.getElementById('custom-xyz-name').value.trim() || 'Couche perso';
+  if (!url) { notify('Entrez une URL XYZ valide'); return; }
+  if (!url.includes('{z}') || !url.includes('{x}') || !url.includes('{y}')) {
+    notify('URL doit contenir {z}, {x}, {y}'); return;
+  }
+  const id = 'custom_' + Date.now();
+  addXYZLayer(id, name, url);
+  document.getElementById('custom-xyz-url').value = '';
+  document.getElementById('custom-xyz-name').value = '';
+}
+
+// ─── Récupérer une tuile de fusion (XYZ distant ou locale) ──────────────────
+async function getFusionTile(layerId, z, x, y) {
+  const l = layers[layerId];
+  if (!l || !l.visible) return null;
+
+  if (l.url) {
+    // Couche XYZ distante : fetch
+    return await fetchRemoteTile(l.url, z, x, y);
+  } else if (l.tileMap) {
+    // Couche locale générée : lire depuis le tileMap en mémoire
+    const key = `${z}/${x}/${y}`;
+    const blobUrl = l.tileMap[key];
+    if (!blobUrl) return null;
+    try {
+      return await createImageBitmap(await fetch(blobUrl).then(r => r.blob()));
+    } catch(e) { return null; }
+  }
+  return null;
+}
+
+// ─── Mode ZIP : 'current' ou 'full' ─────────────────────────────────────────
+let zipMode = 'current';
+function setZipMode(mode) {
+  zipMode = mode;
+  document.getElementById('mode-current-btn').classList.toggle('active-mode', mode === 'current');
+  document.getElementById('mode-full-btn').classList.toggle('active-mode', mode === 'full');
+  const regCount = Object.keys(globalTileRegistry).length;
+  document.getElementById('zip-mode-info').textContent = mode === 'full' && regCount > 0
+    ? `${regCount} tuiles dans le registre seront incluses`
+    : '';
+}
+
+// ─── Fusion XYZ : liste des couches disponibles ───────────────────────────────
+// Couches XYZ dont on veut fusionner les tuiles (URLs distantes)
+const xyzFusionSelected = new Set();
+
+function renderXyzFusionList() {
+  const xyzLayers = Object.entries(layers).filter(([id, l]) => l.url && !id.startsWith('__local'));
+  const group = document.getElementById('xyz-fusion-group');
+  const list  = document.getElementById('xyz-fusion-list');
+  if (!xyzLayers.length) { group.style.display = 'none'; return; }
+  group.style.display = 'block';
+  list.innerHTML = xyzLayers.map(([id, l]) => `
+    <label style="display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;font-size:12px;">
+      <input type="checkbox" id="xyz-fuse-${id}"
+        ${xyzFusionSelected.has(id) ? 'checked' : ''}
+        onchange="toggleXyzFusion('${id}', this.checked)"
+        style="accent-color:#c8a96e;">
+      <span style="color:#c8b898;">${l.name}</span>
+    </label>
+  `).join('');
+}
+
+function toggleXyzFusion(id, checked) {
+  checked ? xyzFusionSelected.add(id) : xyzFusionSelected.delete(id);
+}
+
+// Mettre à jour la liste quand on ouvre le panel
+const origToggleGeoPanel = window.toggleGeoPanel;
+function toggleGeoPanel() {
+  document.getElementById('geo-panel').classList.toggle('visible');
+  if (document.getElementById('geo-panel').classList.contains('visible')) renderXyzFusionList();
+}
+
+// Exposer l'URL dans l'objet layer
+const _origAddXYZLayer = addXYZLayer;
+function addXYZLayer(id, name, url) {
+  if (layers[id]) { notify('Couche déjà présente : ' + name); return; }
+  const layer = L.tileLayer(url, { maxZoom: 18, opacity: 0.85, crossOrigin: '' });
+  layer.addTo(map);
+  layers[id] = { layer, name, url, visible: true };
+  renderLayersList();
+  notify('Couche ajoutée : ' + name);
+}
+
+// ─── Télécharger une tuile XYZ distante et la retourner comme ImageBitmap ────
+async function fetchRemoteTile(urlTemplate, z, x, y) {
+  const url = urlTemplate.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+  try {
+    const resp = await fetch(url, { mode: 'cors' });
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    return await createImageBitmap(blob);
+  } catch(e) { return null; }
+}
+
+function updateRegistryInfo() {
+  const count = Object.keys(globalTileRegistry).length;
+  const box = document.getElementById('registry-info');
+  box.style.display = count > 0 ? 'block' : 'none';
+  document.getElementById('registry-count').textContent = count;
+
+  // Mettre à jour la section export
+  const exportSection = document.getElementById('export-section');
+  exportSection.style.display = count > 0 ? 'block' : 'none';
+  if (count > 0) updateExportZoomList();
+}
+
+function clearRegistry() {
+  for (const k in globalTileRegistry) delete globalTileRegistry[k];
+  updateRegistryInfo();
+  notify('Registre vidé — prochain plan généré sans fusion');
+}
+
+document.getElementById('export-proj').addEventListener('change', function() {
+  document.getElementById('export-custom-proj-group').style.display =
+    this.value === 'custom' ? 'block' : 'none';
+});
+
+function updateExportZoomList() {
+  // Lister les niveaux de zoom disponibles dans le registre
+  const zooms = new Set();
+  for (const k in globalTileRegistry) {
+    const z = parseInt(k.split('/')[1]);
+    if (!isNaN(z)) zooms.add(z);
+  }
+  const sel = document.getElementById('export-zoom');
+  sel.innerHTML = [...zooms].sort((a,b)=>b-a).map(z => {
+    // Compter les tuiles à ce zoom
+    const tiles = Object.keys(globalTileRegistry).filter(k => parseInt(k.split('/')[1]) === z);
+    return `<option value="${z}">Zoom ${z} — ${tiles.length} tuiles</option>`;
+  }).join('');
+  updateExportSizeInfo();
+}
+
+function updateExportSizeInfo() {
+  const z = parseInt(document.getElementById('export-zoom').value);
+  if (isNaN(z)) return;
+  const keys = Object.keys(globalTileRegistry).filter(k => parseInt(k.split('/')[1]) === z);
+  if (!keys.length) return;
+  const xs = keys.map(k => parseInt(k.split('/')[2]));
+  const ys = keys.map(k => parseInt(k.split('/')[3]));
+  const W = (Math.max(...xs) - Math.min(...xs) + 1) * 256;
+  const H = (Math.max(...ys) - Math.min(...ys) + 1) * 256;
+  document.getElementById('export-size-info').textContent =
+    `Image résultante : ~${W}×${H} px (${Math.round(W*H/1e6)} Mpx)`;
+}
+document.getElementById('export-zoom').addEventListener('change', updateExportSizeInfo);
+
+// ─── Projections (même liste que pour le tuilage) ─────────────────────────────
+const EXPORT_PROJ_DEFS = {
+  '4326': '+proj=longlat +datum=WGS84 +no_defs',
+  '2154': '+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=49 +lat_2=44 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+  '27572': '+proj=lcc +lat_1=46.8 +lat_0=46.8 +lon_0=2.33722917 +k_0=0.99987742 +x_0=600000 +y_0=2200000 +a=6378249.2 +b=6356515 +towgs84=-168,-60,320,0,0,0,0 +pm=paris +units=m +no_defs',
+  '27571': '+proj=lcc +lat_1=49.5 +lat_0=49.5 +lon_0=2.33722917 +k_0=0.999877341 +x_0=600000 +y_0=1200000 +a=6378249.2 +b=6356515 +towgs84=-168,-60,320,0,0,0,0 +pm=paris +units=m +no_defs',
+  '27573': '+proj=lcc +lat_1=44.1 +lat_0=44.1 +lon_0=2.33722917 +k_0=0.999877499 +x_0=600000 +y_0=3200000 +a=6378249.2 +b=6356515 +towgs84=-168,-60,320,0,0,0,0 +pm=paris +units=m +no_defs',
+  '27574': '+proj=lcc +lat_1=42.165 +lat_0=42.165 +lon_0=2.33722917 +k_0=0.99994471 +x_0=234.358 +y_0=4185861.369 +a=6378249.2 +b=6356515 +towgs84=-168,-60,320,0,0,0,0 +pm=paris +units=m +no_defs',
+  '3857': '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +no_defs'
+};
+
+async function exportAssembledImage() {
+  const z = parseInt(document.getElementById('export-zoom').value);
+  const exportProjSel = document.getElementById('export-proj').value;
+  const exportProjDef = exportProjSel === 'custom'
+    ? document.getElementById('export-custom-proj').value
+    : (EXPORT_PROJ_DEFS[exportProjSel] || EXPORT_PROJ_DEFS['2154']);
+  const quality = parseInt(document.getElementById('export-quality').value) / 100;
+  const bg = document.getElementById('export-bg').value;
+
+  // Récupérer les clés du zoom choisi
+  // Format clé : "folderName/z/x/y"
+  const keys = Object.keys(globalTileRegistry).filter(k => parseInt(k.split('/')[1]) === z);
+  if (!keys.length) { notify('Aucune tuile à ce niveau de zoom'); return; }
+
+  const pa = document.getElementById('progress-area');
+  pa.classList.add('visible');
+  function sp(pct, label) {
+    document.getElementById('progress-fill').style.width = pct+'%';
+    document.getElementById('progress-label').textContent = label;
+    document.getElementById('progress-detail').textContent = '';
+  }
+  sp(5, 'Calcul de l\'emprise…');
+  await sleep(10);
+
+  // Emprise en tuiles
+  const txArr = keys.map(k => parseInt(k.split('/')[2]));
+  const tyArr = keys.map(k => parseInt(k.split('/')[3]));
+  const txMin = Math.min(...txArr), txMax = Math.max(...txArr);
+  const tyMin = Math.min(...tyArr), tyMax = Math.max(...tyArr);
+  const W = (txMax - txMin + 1) * 256;
+  const H = (tyMax - tyMin + 1) * 256;
+
+  if (W * H > 400e6) {
+    if (!confirm(`L'image ferait ${Math.round(W*H/1e6)} Mpx (${W}×${H}px). Continuer ?`)) {
+      pa.classList.remove('visible'); return;
+    }
+  }
+
+  sp(10, `Assemblage ${W}×${H} px…`);
+  await sleep(10);
+
+  // Canvas d'assemblage
+  const aCanvas = document.createElement('canvas');
+  aCanvas.width = W; aCanvas.height = H;
+  const aCtx = aCanvas.getContext('2d');
+
+  // Fond
+  aCtx.fillStyle = bg;
+  aCtx.fillRect(0, 0, W, H);
+
+  // Dessiner chaque tuile à sa position
+  let done = 0;
+  for (const key of keys) {
+    const parts = key.split('/');
+    const tx = parseInt(parts[2]), ty = parseInt(parts[3]);
+    const dx = (tx - txMin) * 256;
+    const dy = (ty - tyMin) * 256;
+    const bmp = globalTileRegistry[key];
+    if (bmp) aCtx.drawImage(bmp, dx, dy);
+    done++;
+    if (done % 20 === 0) {
+      sp(10 + Math.round(done/keys.length * 60), `Assemblage… ${done}/${keys.length} tuiles`);
+      await sleep(0);
+    }
+  }
+
+  sp(72, 'Calcul du worldfile…');
+  await sleep(10);
+
+  // ── Calcul du worldfile dans la projection cible ─────────────────────────
+  // Coin TL de la tuile (txMin, tyMin) en WGS84
+  const bboxTL = tileToBBox(txMin, tyMin, z);
+  const bboxTR = tileToBBox(txMax, tyMin, z);
+  const bboxBL = tileToBBox(txMin, tyMax, z);
+
+  // 3 points de référence : TL, TR (1px à droite), BL (1px en bas)
+  // On convertit les coins en coordonnées dans la projection cible
+  const wgs84def = '+proj=longlat +datum=WGS84 +no_defs';
+
+  function toTargetProj(lon, lat) {
+    if (exportProjSel === '4326') return [lon, lat];
+    return proj4(wgs84def, exportProjDef, [lon, lat]);
+  }
+
+  // Coin supérieur gauche (centre du pixel 0,0)
+  const pixSize = 256; // nb pixels par tuile
+  // lon/lat du coin TL exact (bord, pas centre)
+  const [xTL, yTL] = toTargetProj(bboxTL.lonMin, bboxTL.latMax);
+  const [xTR, yTR] = toTargetProj(bboxTR.lonMax, bboxTL.latMax); // coin TR
+  const [xBL, yBL] = toTargetProj(bboxTL.lonMin, bboxBL.latMin); // coin BL
+
+  // Résolution et rotation (transformation affine simple)
+  // On a W pixels en X sur (xTR-xTL) unités, H pixels en Y sur (yBL-yTL) unités
+  const A = (xTR - xTL) / W;  // variation X par pixel colonne
+  const D = (yTR - yTL) / W;  // rotation
+  const B = (xBL - xTL) / H;  // rotation
+  const E = (yBL - yTL) / H;  // variation Y par pixel ligne (négatif)
+
+  // Centre du pixel TL (0,0) = coin TL + demi-pixel
+  const C = xTL + A * 0.5 + B * 0.5;
+  const F = yTL + D * 0.5 + E * 0.5;
+
+  const worldfile = [A, D, B, E, C, F].map(v => v.toFixed(10)).join('\r\n') + '\r\n';
+
+  sp(85, 'Encodage JPG…');
+  await sleep(10);
+
+  // Encoder en JPEG
+  const jpgBlob = await new Promise(res => aCanvas.toBlob(res, 'image/jpeg', quality));
+
+  sp(95, 'Création du ZIP…');
+  await sleep(10);
+
+  // Nom de fichier de base (depuis le dossier courant)
+  const baseName = document.getElementById('folder-name').value.trim() || 'assemblage';
+  const epsgLabel = exportProjSel === 'custom' ? 'custom' : `EPSG${exportProjSel}`;
+  const fileName = `${baseName}_z${z}_${epsgLabel}`;
+
+  // Télécharger JPG + JPW dans un mini-ZIP
+  const zipExport = new JSZip();
+  zipExport.file(`${fileName}.jpg`, await jpgBlob.arrayBuffer());
+  zipExport.file(`${fileName}.jpw`, worldfile);
+  zipExport.file(`${fileName}_EPSG.txt`,
+    `Projection : EPSG:${exportProjSel}\nProj4 : ${exportProjDef}\nZoom source : ${z}\nDimensions : ${W}×${H} px\nTuiles assemblées : ${keys.length}\n`);
+
+  const zipBlob = await zipExport.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+
+  sp(100, 'Téléchargement…');
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${fileName}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  pa.classList.remove('visible');
+  notify(`✓ Export ${W}×${H}px · ${Math.round(jpgBlob.size/1024)}Ko JPG`);
+}
+
+// ─── Ajout couche locale (blob URLs depuis ZIP) ──────────────────────────────
+async function addLocalTileLayer(folderName, zip, zMin, zMax, count) {
+  if (count === 0) return;
+  const tileMap = {};
+  const files = Object.keys(zip.files).filter(n => n.endsWith('.png'));
+  for (const filename of files) {
+    const blob = await zip.files[filename].async('blob');
+    const url = URL.createObjectURL(blob);
+    // key = z/x/y
+    const key = filename.replace(folderName+'/', '').replace('.png','');
+    tileMap[key] = url;
+  }
+
+  const layerId = folderName + '_' + Date.now();
+  const tileLayer = L.tileLayer('', {
+    maxNativeZoom: zMax, minNativeZoom: zMin, minZoom: 1, maxZoom: 20, opacity: 0.9,
+    tileSize: 256
+  });
+
+  // Surcharger createTile
+  tileLayer.createTile = function(coords, done) {
+    const img = document.createElement('img');
+    img.crossOrigin = '';
+    const key = `${coords.z}/${coords.x}/${coords.y}`;
+    if (tileMap[key]) {
+      img.onload = () => done(null, img);
+      img.onerror = () => done(null, img);
+      img.src = tileMap[key];
+    } else {
+      img.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+      done(null, img);
+    }
+    return img;
+  };
+
+  tileLayer.addTo(map);
+  // Stocker tileMap dans l'objet couche pour getFusionTile
+  layers[layerId] = { layer: tileLayer, name: '📋 ' + folderName, visible: true, tileMap };
+  renderLayersList();
+  if (window._previewRect) { map.removeLayer(window._previewRect); window._previewRect = null; }
+}
+
+function generateLeafletSnippet(folder, zMin, zMax) {
+  return `// Snippet Leaflet pour charger les tuiles "${folder}"
+// Copiez le dossier "${folder}" sur votre serveur web.
+
+const ${folder.replace(/[^a-zA-Z0-9]/g,'_')} = L.tileLayer('./${folder}/{z}/{x}/{y}.png', {
+  tileSize: 256,
+  minZoom: ${zMin},
+  maxZoom: ${zMax},
+  opacity: 0.9,
+  attribution: '${folder}'
+});
+${folder.replace(/[^a-zA-Z0-9]/g,'_')}.addTo(map);
+
+// Note: les tuiles sont des PNG avec transparence alpha.
+// Elles peuvent se superposer à d'autres couches sans masquer l'arrière-plan.
+`;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Init
+renderLayersList();
+</script>
+</body>
+</html>
